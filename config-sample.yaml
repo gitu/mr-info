@@ -1,0 +1,18 @@
+gitlab:
+  token: xxxx
+  url: https://gitlab.com/api/v4
+  projects:
+    - /asdf/project1
+    - /asdf/project2
+  merge_requests:
+    title_regex: "[a-zA-Z]+\\((?P<Issue>(?P<Project>[A-Z]+)-[0-9]+)\\):.*"
+    version_regex: ":tada: This MR is included in version (?P<Version>[0-9]+\\.[0-9]+\\.[0-9]+) :tada:"
+    version_url_regex: "The release is available on \\[GitLab release\\]\\((?P<VersionUrl>[^)]+)\\)."
+    updated_duration: "96h"
+    release_bot_usernames:
+      - ggg
+
+jira:
+  targets:
+    - PROJECT1
+    - PROJECT2
