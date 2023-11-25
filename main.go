@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	jira "github.com/andygrunwald/go-jira/v2/onpremise"
 	"github.com/charmbracelet/log"
 	. "github.com/gitu/mr-info/pkg/logging"
 	"github.com/spf13/viper"
@@ -9,6 +11,7 @@ import (
 	"gopkg.in/yaml.v3"
 	"os"
 	"regexp"
+	"strings"
 	"time"
 )
 
@@ -21,6 +24,7 @@ type MergeRequestInfo struct {
 	VersionUrl           string     `yaml:"version_url,omitempty"`
 	MergeRequestUpdateAt *time.Time `yaml:"merge_request_update_at,omitempty"`
 	NoteUpdateAt         *time.Time `yaml:"note_update_at,omitempty"`
+	Url                  string     `yaml:"url,omitempty"`
 }
 
 //go:generate go run github.com/deepmap/oapi-codegen/v2/cmd/oapi-codegen -package gitlab -generate types,client -o pkg/gitlab/gitlab.gen.go openapi-gitlab.yaml
@@ -28,20 +32,97 @@ func main() {
 
 	initialize()
 
-	client, err := gitlab.NewClient(viper.GetString("gitlab.token"), gitlab.WithBaseURL(viper.GetString("gitlab.url")))
-	if err != nil {
-		Fatal("Failed to create client", err)
+	if len(os.Args) < 2 {
+		Fatal("No mode specified", nil, "available_modes", "fetch,push,connected")
 	}
-	selectedProjects, jiraTargets := getTargetProjects(client)
-	issuesToMergeRequests := buildIssueMergeRequestMap(selectedProjects, client, jiraTargets)
+	if os.Args[1] == "" {
+		Fatal("No mode specified", nil, "available_modes", "fetch,push,connected")
+	}
+	if os.Args[1] != "fetch" && os.Args[1] != "push" && os.Args[1] != "connected" {
+		Fatal("Invalid mode specified", nil, "available_modes", "fetch,push,connected")
+	}
+	issuesToMergeRequests := map[string][]MergeRequestInfo{}
+	if os.Args[1] == "fetch" || os.Args[1] == "connected" {
 
-	out, err := yaml.Marshal(issuesToMergeRequests)
-	if err != nil {
-		Fatal("Failed to marshal", err)
+		client, err := gitlab.NewClient(viper.GetString("gitlab.token"), gitlab.WithBaseURL(viper.GetString("gitlab.url")))
+		if err != nil {
+			Fatal("Failed to create client", err)
+		}
+		selectedProjects, jiraTargets := getTargetProjects(client)
+		issuesToMergeRequests = buildIssueMergeRequestMap(selectedProjects, client, jiraTargets)
+
 	}
-	err = os.WriteFile(viper.GetString("output"), out, 0644)
-	if err != nil {
-		Fatal("Failed to write file", err, "file", viper.GetString("output"))
+	if os.Args[1] == "fetch" {
+		out, err := yaml.Marshal(issuesToMergeRequests)
+		if err != nil {
+			Fatal("Failed to marshal", err)
+		}
+		err = os.WriteFile(viper.GetString("ioFile"), out, 0644)
+		if err != nil {
+			Fatal("Failed to write file", err, "file", viper.GetString("ioFile"))
+		}
+	}
+	if os.Args[1] == "push" {
+		file, err := os.ReadFile(viper.GetString("ioFile"))
+		if err != nil {
+			Fatal("Failed to read file", err, "file", viper.GetString("ioFile"))
+		}
+		err = yaml.Unmarshal(file, &issuesToMergeRequests)
+		if err != nil {
+			Fatal("Failed to unmarshal", err, "file", viper.GetString("ioFile"))
+		}
+	}
+
+	if os.Args[1] == "push" || os.Args[1] == "connected" {
+		upsertJiraIssues(issuesToMergeRequests)
+	}
+}
+
+func upsertJiraIssues(issuesToMergeRequests map[string][]MergeRequestInfo) {
+	tp := jira.BearerAuthTransport{
+		Token: viper.GetString("jira.token"),
+	}
+	jiraClient, _ := jira.NewClient(viper.GetString("jira.url"), tp.Client())
+
+	for issueId, mergeRequests := range issuesToMergeRequests {
+		issue, _, err := jiraClient.Issue.Get(context.Background(), issueId, nil)
+		if err != nil {
+			Log.Warn("Failed to get issue", "error", err, "issue", issueId)
+			continue
+		}
+		trailerString := "Your [mr-info bot](https://github.com/gitu/mr-info) <3"
+		for _, mergeRequest := range mergeRequests {
+			commentId := ""
+			updatedComment := jira.Comment{}
+			if issue.Fields.Comments != nil {
+				searchString := fmt.Sprintf("(%s)", mergeRequest.Url)
+				for _, comment := range issue.Fields.Comments.Comments {
+					if strings.Contains(comment.Body, searchString) {
+						if strings.Contains(comment.Body, trailerString) {
+							commentId = comment.ID
+							updatedComment = *comment
+							break
+						}
+					}
+				}
+			}
+			versionInfo := ""
+			if mergeRequest.TadaVersion != "" {
+				versionInfo = fmt.Sprintf("Released in Version: [%s](%s)\n", mergeRequest.TadaVersion, mergeRequest.VersionUrl)
+			}
+			updatedComment.Body = fmt.Sprintf("Gitlab Merge Request: [%s](%s) - %s\n\n%s\n%s", mergeRequest.Title, mergeRequest.Url, mergeRequest.State, versionInfo, trailerString)
+			if commentId == "" {
+				_, _, err := jiraClient.Issue.AddComment(context.Background(), issueId, &updatedComment)
+				if err != nil {
+					Log.Warn("Failed to add comment", "error", err, "issue", issueId)
+				}
+			} else {
+				_, _, err := jiraClient.Issue.UpdateComment(context.Background(), issueId, &updatedComment)
+				if err != nil {
+					Log.Warn("Failed to update comment", "error", err, "issue", issueId)
+				}
+			}
+		}
 	}
 }
 
@@ -81,6 +162,7 @@ func buildIssueMergeRequestMap(selectedProjects []*gitlab.Project, client *gitla
 				Log.Info("SELECTED", "project", jiraProject, "issue", issue)
 			} else {
 				Log.Info("IGNORED", "project", jiraProject, "issue", issue)
+				continue
 			}
 
 			notes, _, err := client.Notes.ListMergeRequestNotes(project.ID, mergeRequest.IID, &gitlab.ListMergeRequestNotesOptions{
@@ -115,6 +197,7 @@ func buildIssueMergeRequestMap(selectedProjects []*gitlab.Project, client *gitla
 			}
 
 			issuesToMergeRequests[issue] = append(issuesToMergeRequests[issue], MergeRequestInfo{
+				Url:                  mergeRequest.WebURL,
 				MergeRequestUpdateAt: mergeRequest.UpdatedAt,
 				Project:              jiraProject,
 				Issue:                issue,
