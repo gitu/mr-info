@@ -11,12 +11,10 @@ gitlab:
     updated_duration: "96h"
     release_bot_usernames:
       - ggg
-
 jira:
   targets:
     - PROJECT1
     - PROJECT2
   token: xxxx
   url: https://jira.atlassian.net
-
 ioFile: output.yaml

@@ -33,16 +33,16 @@ func main() {
 	initialize()
 
 	if len(os.Args) < 2 {
-		Fatal("No mode specified", nil, "available_modes", "fetch,push,connected")
+		Fatal("No mode specified", nil, "available_modes", "fetch,push,sync")
 	}
 	if os.Args[1] == "" {
-		Fatal("No mode specified", nil, "available_modes", "fetch,push,connected")
+		Fatal("No mode specified", nil, "available_modes", "fetch,push,sync")
 	}
-	if os.Args[1] != "fetch" && os.Args[1] != "push" && os.Args[1] != "connected" {
-		Fatal("Invalid mode specified", nil, "available_modes", "fetch,push,connected")
+	if os.Args[1] != "fetch" && os.Args[1] != "push" && os.Args[1] != "sync" {
+		Fatal("Invalid mode specified", nil, "available_modes", "fetch,push,sync")
 	}
 	issuesToMergeRequests := map[string][]MergeRequestInfo{}
-	if os.Args[1] == "fetch" || os.Args[1] == "connected" {
+	if os.Args[1] == "fetch" || os.Args[1] == "sync" {
 
 		client, err := gitlab.NewClient(viper.GetString("gitlab.token"), gitlab.WithBaseURL(viper.GetString("gitlab.url")))
 		if err != nil {
@@ -73,7 +73,7 @@ func main() {
 		}
 	}
 
-	if os.Args[1] == "push" || os.Args[1] == "connected" {
+	if os.Args[1] == "push" || os.Args[1] == "sync" {
 		upsertJiraIssues(issuesToMergeRequests)
 	}
 }
