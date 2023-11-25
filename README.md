@@ -3,6 +3,11 @@
 ## Description
 
 Mr. Info is a utility to fetch gitlab merge requests and import the changes into a disconnected jira instance.
+It expects merge requests to be formatted in a specific way:
+- The title must contain the issue key in the format `feat(PROJECT-123): ...`.
+- It expects a default semantic release comment to be present in the merge request comments.
+
+The detailed formats can be configured via regexes.
 
 ## Installation
 with go:
