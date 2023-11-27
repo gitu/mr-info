@@ -4,7 +4,7 @@ go 1.21
 
 require (
 	github.com/andygrunwald/go-jira/v2 v2.0.0-20231114185916-57d1e28f1bb7
-	github.com/charmbracelet/log v0.3.0
+	github.com/charmbracelet/log v0.3.1
 	github.com/spf13/viper v1.17.0
 	github.com/xanzy/go-gitlab v0.94.0
 	gopkg.in/yaml.v3 v3.0.1
